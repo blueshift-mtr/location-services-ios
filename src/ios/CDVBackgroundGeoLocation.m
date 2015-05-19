@@ -1,6 +1,7 @@
 ////
 //  CDVBackgroundGeoLocation
 //
+//  Created by Chris Scott <chris@transistorsoft.com> on 2013-06-15
 //
 #import "CDVLocation.h"
 #import "CDVBackgroundGeoLocation.h"
@@ -45,6 +46,8 @@
     CLCircularRegion *stationaryRegion;
     NSInteger locationAcquisitionAttempts;
     
+    NSMutableDictionary *params;
+    
     BOOL isAcquiringStationaryLocation;
     NSInteger maxStationaryLocationAttempts;
     
@@ -74,6 +77,7 @@
     localNotification.timeZone = [NSTimeZone defaultTimeZone];
     
     locationQueue = [[NSMutableArray alloc] init];
+    params = [[NSMutableDictionary alloc] init];
     
     isMoving = NO;
     isUpdatingLocation = NO;
@@ -139,6 +143,7 @@
     NSLog(@"CDVBackgroundGeoLocation configure");
     NSLog(@"  - token: %@", token);
     NSLog(@"  - url: %@", url);
+    NSLog(@" - params: %@", params);
     NSLog(@"  - distanceFilter: %ld", (long)distanceFilter);
     NSLog(@"  - stationaryRadius: %ld", (long)stationaryRadius);
     NSLog(@"  - locationTimeout: %ld", (long)locationTimeout);
@@ -177,6 +182,14 @@
     stopOnTerminate     = [[command.arguments objectAtIndex: 11] boolValue];
     url                 = [command.arguments objectAtIndex: 2];
     
+    if([command.arguments objectAtIndex: 0]) {
+        NSError *jsonError;
+        NSData *objectData = [[command.arguments objectAtIndex: 0] dataUsingEncoding:NSUTF8StringEncoding];
+        params = [NSJSONSerialization JSONObjectWithData:objectData
+                                             options:NSJSONReadingMutableContainers
+                                               error:&jsonError];
+    }
+    
     self.syncCallbackId = command.callbackId;
     
     locationManager.activityType = activityType;
@@ -187,6 +200,7 @@
     NSLog(@"CDVBackgroundGeoLocation configure");
     NSLog(@"  - token: %@", token);
     NSLog(@"  - url: %@", url);
+    NSLog(@" - params: %@", params);
     NSLog(@"  - distanceFilter: %ld", (long)distanceFilter);
     NSLog(@"  - stationaryRadius: %ld", (long)stationaryRadius);
     NSLog(@"  - locationTimeout: %ld", (long)locationTimeout);
@@ -497,10 +511,16 @@
     
 }
 
+
 //Send the location to Server
 - (void)updateLocationToServer:(NSMutableDictionary*)data {
     
     NSLog(@"start updateLocationToServer");
+    
+    if(params) {
+        NSLog(@"Adding  - params: %@", params);
+        [data addEntriesFromDictionary:params];
+    }
     
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data options:0 error:NULL];
     
