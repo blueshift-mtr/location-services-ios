@@ -7,8 +7,7 @@ module.exports = {
     * @property {Object} config
     */
     config: {},
-    init: function(config) {
-        console.log('BG INIT BABEH!');
+    init: function(success, failure, config) {
         this.config = config;
         var params              = JSON.stringify(config.params || {}),
             headers             = JSON.stringify(config.headers || {}),

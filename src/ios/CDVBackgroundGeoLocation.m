@@ -1,7 +1,6 @@
 ////
 //  CDVBackgroundGeoLocation
 //
-//  Created by Chris Scott <chris@transistorsoft.com> on 2013-06-15
 //
 #import "CDVLocation.h"
 #import "CDVBackgroundGeoLocation.h"
@@ -55,6 +54,8 @@
     BOOL _isBackgroundMode;
     BOOL _deferringUpdates;
     
+    NSTimer *_timer;
+    
     NSInteger stationaryRadius;
     NSInteger distanceFilter;
     NSInteger locationTimeout;
@@ -84,6 +85,7 @@
     maxStationaryLocationAttempts   = 4;
     maxSpeedAcquistionAttempts      = 3;
     _isBackgroundMode = NO;
+    _deferringUpdates = NO;
     
     bgTask = UIBackgroundTaskInvalid;
     
@@ -130,7 +132,7 @@
     self.syncCallbackId = command.callbackId;
     
     locationManager.activityType = activityType;
-    locationManager.pausesLocationUpdatesAutomatically = YES;
+    locationManager.pausesLocationUpdatesAutomatically = NO;
     locationManager.distanceFilter = distanceFilter; // meters
     locationManager.desiredAccuracy = desiredAccuracy;
     
@@ -156,7 +158,50 @@
 
 - (void) init:(CDVInvokedUrlCommand*)command
 {
-    NSLog(@"CONFIG BITCHES");
+    NSLog(@"CDVBackgroundGeoLocation configure");
+    // in iOS, we call to javascript for HTTP now so token and url should be @deprecated until Android calls out to javascript.
+    // Params.
+    //    0       1       2           3               4                5               6            7           8                9               10               11
+    //[params, headers, url, stationaryRadius, distanceFilter, locationTimeout, desiredAccuracy, debug, notificationTitle, notificationText, activityType, stopOnTerminate]
+    
+    // UNUSED ANDROID VARS
+    //params = [command.arguments objectAtIndex: 0];
+    //headers = [command.arguments objectAtIndex: 1];
+    //url = [command.arguments objectAtIndex: 2];
+    stationaryRadius    = [[command.arguments objectAtIndex: 3] intValue];
+    distanceFilter      = [[command.arguments objectAtIndex: 4] intValue];
+    locationTimeout     = [[command.arguments objectAtIndex: 5] intValue];
+    desiredAccuracy     = [self decodeDesiredAccuracy:[[command.arguments objectAtIndex: 6] intValue]];
+    isDebugging         = [[command.arguments objectAtIndex: 7] boolValue];
+    activityType        = [self decodeActivityType:[command.arguments objectAtIndex:10]];
+    stopOnTerminate     = [[command.arguments objectAtIndex: 11] boolValue];
+    url                 = [command.arguments objectAtIndex: 2];
+    
+    self.syncCallbackId = command.callbackId;
+    
+    locationManager.activityType = activityType;
+    locationManager.pausesLocationUpdatesAutomatically = NO;
+    locationManager.distanceFilter = distanceFilter; // meters
+    locationManager.desiredAccuracy = desiredAccuracy;
+    
+    NSLog(@"CDVBackgroundGeoLocation configure");
+    NSLog(@"  - token: %@", token);
+    NSLog(@"  - url: %@", url);
+    NSLog(@"  - distanceFilter: %ld", (long)distanceFilter);
+    NSLog(@"  - stationaryRadius: %ld", (long)stationaryRadius);
+    NSLog(@"  - locationTimeout: %ld", (long)locationTimeout);
+    NSLog(@"  - desiredAccuracy: %ld", (long)desiredAccuracy);
+    NSLog(@"  - activityType: %@", [command.arguments objectAtIndex:7]);
+    NSLog(@"  - debug: %d", isDebugging);
+    NSLog(@"  - stopOnTerminate: %d", stopOnTerminate);
+    
+    // ios 8 requires permissions to send local-notifications
+    if (isDebugging) {
+        UIApplication *app = [UIApplication sharedApplication];
+        if ([app respondsToSelector:@selector(registerUserNotificationSettings:)]) {
+            [app registerUserNotificationSettings:[UIUserNotificationSettings settingsForTypes:UIUserNotificationTypeAlert|UIUserNotificationTypeBadge|UIUserNotificationTypeSound categories:nil]];
+        }
+    }
 }
 
 -(NSInteger)decodeDesiredAccuracy:(NSInteger)accuracy
@@ -204,9 +249,8 @@
     NSLog(@"- CDVBackgroundGeoLocation start (background? %d)", state);
     
     [self startUpdatingLocation];
-    if (state == UIApplicationStateBackground) {
-        
-    }
+    
+    
     CDVPluginResult* result = nil;
     result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
@@ -220,12 +264,8 @@
     enabled = NO;
     isMoving = NO;
     
+    [locationManager stopUpdatingLocation];
     
-    [locationManager stopMonitoringSignificantLocationChanges];
-    if (stationaryRegion != nil) {
-        [locationManager stopMonitoringForRegion:stationaryRegion];
-        stationaryRegion = nil;
-    }
     CDVPluginResult* result = nil;
     result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
@@ -234,7 +274,6 @@
 
 -(void) initLocationManager
 {
-    NSLog(@"INIT LOCATION MANAGER");
     // Create the manager object
     locationManager = [[CLLocationManager alloc] init];
     locationManager.delegate = self;
@@ -244,7 +283,6 @@
     [locationManager setDistanceFilter:kCLDistanceFilterNone];
     locationManager.pausesLocationUpdatesAutomatically = NO;
     // Once configured, the location manager must be "started".
-    //[self startUpdatingLocation];
 }
 
 - (void) startUpdatingLocation
@@ -294,17 +332,16 @@
     CLLocation *location = [locations lastObject];
     NSLog(@"didUpdateToLocation %@", location);    //  store data
     
-    [self notify:[NSString stringWithFormat:@"Location Update: %@", location]];
-    
-    //CLLocation *newLocation = [locations lastObject];
-    //self.userLocation = newLocation;
+    if(isDebugging) {
+        [self notify:[NSString stringWithFormat:@"Location Update: %@", location]];
+    }
     
     //tell the centralManager that you want to deferred this updatedLocation
-    if (_isBackgroundMode && !_deferringUpdates)
-    {
-        _deferringUpdates = YES;
-        [locationManager allowDeferredLocationUpdatesUntilTraveled:CLLocationDistanceMax timeout:10];
-    }
+    //    if (_isBackgroundMode && !_deferringUpdates)
+    //    {
+    //        _deferringUpdates = YES;
+    //        [locationManager allowDeferredLocationUpdatesUntilTraveled:10 timeout:10];
+    //    }
     
     NSMutableDictionary *data = [self locationToHash:location];
     
@@ -417,11 +454,12 @@
 - (void)locationManagerDidPauseLocationUpdates:(CLLocationManager *)manager
 {
     NSLog(@"- CDVBackgroundGeoLocation paused location updates");
+    //RESTART SERVICE?
 }
 
 - (void) locationManager:(CLLocationManager *)manager didFinishDeferredUpdatesWithError:(NSError *)error {
     NSLog(@"didFinishDeferredUpdatesWithError :%@", [error description]);
-    //_deferringUpdates = NO;
+    _deferringUpdates = NO;
     
     //do something
 }
@@ -431,16 +469,31 @@
  */
 -(void) onSuspend:(NSNotification *) notification
 {
-    NSLog(@"- CDVBackgroundGeoLocation suspend (enabled? %d)", enabled);
-    suspendedAt = [NSDate date];
+    NSLog(@"- CDVBackgroundGeoLocation suspend");
     
+    [locationManager stopUpdatingLocation];
+    
+    UIApplication*    app = [UIApplication sharedApplication];
+    
+    bgTask = [app beginBackgroundTaskWithExpirationHandler:^{
+        [app endBackgroundTask:bgTask];
+        bgTask = UIBackgroundTaskInvalid;
+    }];
+    
+    _timer = [NSTimer scheduledTimerWithTimeInterval:locationTimeout
+                                              target:locationManager
+                                            selector:@selector(startUpdatingLocation)
+                                            userInfo:nil
+                                             repeats:YES];
 }
 /**@
  * Resume.  Turn background off
  */
 -(void) onResume:(NSNotification *) notification
 {
+    [_timer invalidate];
     NSLog(@"- CDVBackgroundGeoLocation resume");
+    [self startUpdatingLocation];
     
 }
 
@@ -449,7 +502,6 @@
     
     NSLog(@"start updateLocationToServer");
     
-    NSString *myUrl = @"https://dev.flybuy.com/api/geolocation/positions/update";
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data options:0 error:NULL];
     
     NSError        *error = nil;
@@ -458,7 +510,7 @@
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] init];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-type"];
-    [request setURL:[NSURL URLWithString:[NSString stringWithFormat:myUrl]]];
+    [request setURL:[NSURL URLWithString:url]];
     [request setHTTPMethod:@"POST"];
     [request setValue:[NSString stringWithFormat:@"%d", [jsonData length]] forHTTPHeaderField:@"Content-Length"];
     [request setHTTPBody:jsonData];
