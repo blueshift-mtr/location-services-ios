@@ -295,6 +295,7 @@
     isMoving = NO;
     
     [locationManager stopUpdatingLocation];
+    [_timer invalidate];
     
     CDVPluginResult* result = nil;
     result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
