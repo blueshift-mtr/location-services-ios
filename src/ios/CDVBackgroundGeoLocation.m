@@ -28,6 +28,9 @@
     UIBackgroundTaskIdentifier bgTask;
     NSDate *lastBgTaskAt;
     
+    UIBackgroundTaskIdentifier monitorTask;
+    NSTimer *monitorTimer;
+    
     NSError *locationError;
     
     BOOL isMoving;
@@ -92,6 +95,8 @@
     _deferringUpdates = NO;
     
     bgTask = UIBackgroundTaskInvalid;
+    monitorTask = UIBackgroundTaskInvalid;
+    
     
     UIApplication *app = [UIApplication sharedApplication];
     if ([app respondsToSelector:@selector(registerUserNotificationSettings:)]) {
@@ -182,7 +187,8 @@
     stopOnTerminate     = [[command.arguments objectAtIndex: 11] boolValue];
     url                 = [command.arguments objectAtIndex: 2];
     
-    if([command.arguments objectAtIndex: 0]) {
+    if([command.arguments objectAtIndex: 0]){
+        NSLog(@"Params %@", [command.arguments objectAtIndex: 0]);
         NSError *jsonError;
         NSData *objectData = [[command.arguments objectAtIndex: 0] dataUsingEncoding:NSUTF8StringEncoding];
         params = [NSJSONSerialization JSONObjectWithData:objectData
@@ -295,7 +301,11 @@
     // attempt to acquire location and thus, the amount of power that will be consumed.
     [locationManager setDesiredAccuracy:kCLLocationAccuracyBest];
     [locationManager setDistanceFilter:kCLDistanceFilterNone];
+    
+    locationManager.distanceFilter = kCLDistanceFilterNone;
+    locationManager.desiredAccuracy = kCLDistanceFilterNone;
     locationManager.pausesLocationUpdatesAutomatically = NO;
+    
     // Once configured, the location manager must be "started".
 }
 
@@ -329,40 +339,46 @@
     [[UIApplication sharedApplication] scheduleLocalNotification:localNotification];
 }
 
-- (void)applicationWillResignActive:(UIApplication *)application {
-    //_isBackgroundMode = YES;
-    NSLog(@"APPLICATION RESIGNING");
-    
-    [locationManager stopUpdatingLocation];
-    [locationManager setDesiredAccuracy:kCLLocationAccuracyBest];
-    [locationManager setDistanceFilter:kCLDistanceFilterNone];
-    locationManager.pausesLocationUpdatesAutomatically = NO;
-    locationManager.activityType = CLActivityTypeAutomotiveNavigation;
-    [self startUpdatingLocation];
-}
-
 -(void) locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray *)locations
 {
     CLLocation *location = [locations lastObject];
-    NSLog(@"didUpdateToLocation %@", location);    //  store data
+    float latitude = locationManager.location.coordinate.latitude;
+    float longitude = locationManager.location.coordinate.longitude;
     
+    NSLog(@"didUpdateToLocation %@", location);    //  store data
+    NSLog(@"Accuracy: %f", location.horizontalAccuracy);
     if(isDebugging) {
-        [self notify:[NSString stringWithFormat:@"Location Update: %@", location]];
+        [self notify:[NSString stringWithFormat:@"Location Update: [%f, %f] Accuracy %f", latitude, longitude, location.horizontalAccuracy]];
     }
     
-    //tell the centralManager that you want to deferred this updatedLocation
-    //    if (_isBackgroundMode && !_deferringUpdates)
-    //    {
-    //        _deferringUpdates = YES;
-    //        [locationManager allowDeferredLocationUpdatesUntilTraveled:10 timeout:10];
-    //    }
     
-    NSLog(@"background time: %f", [UIApplication sharedApplication].backgroundTimeRemaining);
-    NSLog(@"NS Timer: T %@  Valid? %d", _timer.fireDate, _timer.valid);
-    NSLog(@"NS Current Date: T %@", [NSDate date]);
+    // This location is accurate.
     NSMutableDictionary *data = [self locationToHash:location];
     [self updateLocationToServer:data];
     
+    
+    //    if(_isBackgroundMode) {
+    //        [self stopMonitoringForXSeconds];
+    //    }
+    
+}
+
+-(void) stopMonitoringForXSeconds {
+    NSLog(@"Stopping Updates for %ld seconds", (long)locationTimeout);
+    [locationManager stopUpdatingLocation];
+    
+    UIApplication*    app = [UIApplication sharedApplication];
+    
+    monitorTask = [app beginBackgroundTaskWithExpirationHandler:^{
+        [app endBackgroundTask:bgTask];
+        monitorTask = UIBackgroundTaskInvalid;
+    }];
+    
+    monitorTimer = [NSTimer scheduledTimerWithTimeInterval:locationTimeout
+                                                    target:locationManager
+                                                  selector:@selector(startUpdatingLocation)
+                                                  userInfo:nil
+                                                   repeats:NO];
 }
 
 //BG TASK THINGS
@@ -470,9 +486,6 @@
 - (void)locationManagerDidPauseLocationUpdates:(CLLocationManager *)manager
 {
     NSLog(@"- CDVBackgroundGeoLocation paused location updates");
-    if(isDebugging) {
-        
-    }
     //RESTART SERVICE?
 }
 
@@ -488,12 +501,14 @@
  */
 -(void) onSuspend:(NSNotification *) notification
 {
-    NSLog(@"- CDVBackgroundGeoLocation suspend");
-    NSLog(@"- Initiating BG Location Task with interval %i", locationTimeout);
+    _isBackgroundMode = YES;
     
+    NSLog(@"- CDVBackgroundGeoLocation suspend");
     [locationManager stopUpdatingLocation];
     
-    UIApplication* app = [UIApplication sharedApplication];
+    [self startUpdatingLocation];
+    
+    UIApplication*    app = [UIApplication sharedApplication];
     
     bgTask = [app beginBackgroundTaskWithExpirationHandler:^{
         [app endBackgroundTask:bgTask];
@@ -511,9 +526,10 @@
  */
 -(void) onResume:(NSNotification *) notification
 {
+    _isBackgroundMode = NO;
     [_timer invalidate];
     NSLog(@"- CDVBackgroundGeoLocation resume");
-    [self startUpdatingLocation];
+    //[locationManager stopUpdatingLocation];
     
 }
 
