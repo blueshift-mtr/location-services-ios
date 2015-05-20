@@ -186,8 +186,8 @@
         NSError *jsonError;
         NSData *objectData = [[command.arguments objectAtIndex: 0] dataUsingEncoding:NSUTF8StringEncoding];
         params = [NSJSONSerialization JSONObjectWithData:objectData
-                                             options:NSJSONReadingMutableContainers
-                                               error:&jsonError];
+                                                 options:NSJSONReadingMutableContainers
+                                                   error:&jsonError];
     }
     
     self.syncCallbackId = command.callbackId;
@@ -357,8 +357,10 @@
     //        [locationManager allowDeferredLocationUpdatesUntilTraveled:10 timeout:10];
     //    }
     
+    NSLog(@"background time: %f", [UIApplication sharedApplication].backgroundTimeRemaining);
+    NSLog(@"NS Timer: T %@  Valid? %d", _timer.fireDate, _timer.valid);
+    NSLog(@"NS Current Date: T %@", [NSDate date]);
     NSMutableDictionary *data = [self locationToHash:location];
-    
     [self updateLocationToServer:data];
     
 }
@@ -468,6 +470,9 @@
 - (void)locationManagerDidPauseLocationUpdates:(CLLocationManager *)manager
 {
     NSLog(@"- CDVBackgroundGeoLocation paused location updates");
+    if(isDebugging) {
+        
+    }
     //RESTART SERVICE?
 }
 
@@ -484,10 +489,11 @@
 -(void) onSuspend:(NSNotification *) notification
 {
     NSLog(@"- CDVBackgroundGeoLocation suspend");
+    NSLog(@"- Initiating BG Location Task with interval %i", locationTimeout);
     
     [locationManager stopUpdatingLocation];
     
-    UIApplication*    app = [UIApplication sharedApplication];
+    UIApplication* app = [UIApplication sharedApplication];
     
     bgTask = [app beginBackgroundTaskWithExpirationHandler:^{
         [app endBackgroundTask:bgTask];
